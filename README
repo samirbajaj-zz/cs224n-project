@@ -1,0 +1,116 @@
+README
+------
+This file describes the various scripts and utilities and the manner in which
+they were used to generate the summaries.
+
+PRE-PROCESSING
+--------------
+The general sequence of pre-processing steps is as follows:
+
+1) The directory 'shakespeare' contains the raw text of the plays, marked up
+   in XML. Source: http://www.ibiblio.org/xml/examples/shakespeare/
+
+2) Each document was manually edited to remove the credits line (typically the
+   first few words in the text). The results were stored in the directory called
+   'processed'.
+
+3) All-cap words were then removed from each processed file: these are typically
+   names of the actors preceding their lines in the play. Doing so allows the
+   algorithms to not be distracted by the noise.
+
+   for f in `ls *.txt`; do cat $f | python ../remove_all_caps_words.py > ../remove_all_caps/$f; done
+
+4) Words in the text of each play are then uniformly lower-cased.
+
+   for f in `ls *.txt`; do cat $f | tr '[[:upper:]]' '[[:lower:]]' > ../lowercase/$f; done
+
+5) Punctuation is removed.
+
+   for f in `ls *.txt`; do cat $f | sed 's/[:;?!.,-]/ /g' | tr "'" " " > ../remove_punct/$f ; done
+
+6) Stop words are removed.
+
+   for f in `ls *.txt`; do python ../remove_stop_words.py $f > ../remove_stop_words/$f ; done
+
+7) The text is stemmed using a Porter stemmer.
+
+   for f in `ls *.txt`; do python ../porter.py $f > ../stemmed/$f ; done
+
+8) A lexicon of stemmed words is created.
+
+   cat stemmed/*.txt | tr ' ' '\n' | sed '/^\s+$/d' | sort | uniq -c > LEXICON
+
+
+
+# How many unique words across all plays?
+cat shakespeare/*.txt | tr ' !?,:;-.' '\n' | tr '[[:upper:]]' '[[:lower:]]' | sed '/^$/d' | sort | uniq | wc -l
+
+
+CALCULATING SENTENCE FREQUENCIES
+--------------------------------
+(*** These are not used. ***)
+cd remove_all_caps
+for f in `ls *.txt`; do
+    python ../sf.py $f
+    mv sf.dat ../sentence-frequencies/`echo $f | cut -d'.' -f1`.sf;
+done
+
+CALCULATING TERM FREQUENCIES
+----------------------------
+cd stemmed
+for f in `ls *.txt`; do cat $f | tr ' ' '\n' | sed '/^\s+$/d' | sort | uniq -c > ../term-frequencies/$f; done
+# rename the tf files--just to avoid confusion
+for f in `ls *.txt`; do mv $f `echo $f | cut -d'.' -f1`.tf; done
+
+CALCULATING DOCUMENT FREQUENCIES
+--------------------------------
+Document frequencies are computed by the script 'df.py' and saved in the file 'df.dat':
+python df.py term-frequencies/*.tf
+
+SUMMARY CREATION
+----------------
+The input to a summarizer is the text of a play from step 3 above; other processing
+(stemming and lower-casing) is done in the code itself. We do this in order to retain
+the original sentence as part of the Sentence object so that we can display the result
+in terms of the original text. All computation is done on the processed text, i.e.,
+tf-idf values, SVD, and PageRank operate on stemmed, lower-cased words.
+
+# Summarize ALL plays! (cd into remove_all_caps)
+for f in `ls *.txt`; do python ../main.py -doc $f -tf ../term-frequencies/`echo $f | cut -d'.' -f1`.tf -df df.dat -alg tfidf > ../summary-tfidf/$f; done
+
+# SVD version
+for f in `ls *.txt`; do python ../main.py -doc $f -tf ../term-frequencies/`echo $f | cut -d'.' -f1`.tf -df df.dat -alg svd > ../summary-svd/$f; done
+
+# PageRank
+for f in `ls *.txt`; do python ../main.py -doc $f -tf ../term-frequencies/`echo $f | cut -d'.' -f1`.tf -df df.dat -alg pagerank > ../summary-pagerank/$f; done
+
+EVALUATION
+----------
+Trigrams
+========
+python evaluation.py -gold gold_julius_caesar.txt -test summary-pagerank/julius_caesar.txt 
+P: 0.12962962963 R: 0.4375 F1: 0.2
+
+python evaluation.py -gold gold_julius_caesar.txt -test summary-tfidf/julius_caesar.txt 
+P: 0.0344827586207 R: 0.25 F1: 0.0606060606061
+
+python evaluation.py -gold gold_julius_caesar.txt -test summary-kmeans/julius_caesar.txt 
+P: 0.0666666666667 R: 0.25 F1: 0.105263157895
+
+python evaluation.py -gold gold_julius_caesar.txt -test summary-svd/julius_caesar.txt 
+P: 0.0 R: 0.0 F1: 0
+
+Unigrams
+========
+python evaluation.py -gold gold_julius_caesar.txt -test summary-pagerank/julius_caesar.txt -model 1
+P: 0.3 R: 0.405405405405 F1: 0.344827586207
+
+python evaluation.py -gold gold_julius_caesar.txt -test summary-tfidf/julius_caesar.txt -model 1
+P: 0.155555555556 R: 0.378378378378 F1: 0.220472440945
+
+python evaluation.py -gold gold_julius_caesar.txt -test summary-kmeans/julius_caesar.txt -model 1
+P: 0.254901960784 R: 0.351351351351 F1: 0.295454545455
+
+python evaluation.py -gold gold_julius_caesar.txt -test summary-svd/julius_caesar.txt -model 1
+P: 0.0983606557377 R: 0.162162162162 F1: 0.122448979592
+
